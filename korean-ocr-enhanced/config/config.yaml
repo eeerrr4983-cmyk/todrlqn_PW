@@ -1,0 +1,276 @@
+# Korean OCR Enhanced System Configuration
+
+# OCR 엔진 설정
+ocr:
+  # PaddleOCR 설정
+  paddle:
+    use_angle_cls: true
+    lang: korean
+    use_gpu: false  # GPU 사용 여부
+    det_model_dir: ./models/det
+    rec_model_dir: ./models/rec
+    cls_model_dir: ./models/cls
+    
+    # 텍스트 검출 설정
+    det_db_thresh: 0.3
+    det_db_box_thresh: 0.5
+    det_db_unclip_ratio: 1.8
+    
+    # 배치 처리 설정
+    max_batch_size: 10
+    rec_batch_num: 6
+    
+    # 성능 설정
+    use_mp: true
+    total_process_num: 8
+    enable_mkldnn: true
+    cpu_threads: 10
+    
+    # 정확도 설정
+    drop_score: 0.3
+    use_space_char: true
+    precision: fp32
+  
+  # 한국어 특화 설정
+  korean:
+    min_text_size: 10
+    max_text_size: 200
+    enable_jamo_decomposition: true
+    use_dictionary_correction: true
+    
+  # 생기부 특화 설정
+  school_record:
+    document_type: school_record
+    enable_layout_analysis: true
+    enable_table_detection: true
+    extract_specific_fields: true
+
+# 이미지 전처리 설정
+preprocessing:
+  # 해상도 설정
+  target_dpi: 300
+  super_resolution_scale: 2
+  
+  # 노이즈 제거
+  denoise:
+    enabled: true
+    bilateral_d: 9
+    bilateral_sigma_color: 75
+    bilateral_sigma_space: 75
+    nlmeans_h: 10
+  
+  # 선명도 향상
+  sharpening:
+    enabled: true
+    kernel_size: 3
+    sigma: 2.0
+    amount: 1.5
+  
+  # 대비 향상
+  contrast:
+    enabled: true
+    clahe_clip_limit: 3.0
+    clahe_tile_size: [8, 8]
+  
+  # 이진화
+  binarization:
+    enabled: true
+    method: adaptive  # otsu, adaptive, combined
+    block_size: 11
+    constant: 2
+  
+  # 기울기 보정
+  deskew:
+    enabled: true
+    angle_threshold: 0.5
+    max_angle: 45
+
+# 딥러닝 설정
+deep_learning:
+  # 모델 설정
+  models:
+    cnn:
+      enabled: true
+      weight: 0.3
+      num_classes: 11172
+      
+    crnn:
+      enabled: true
+      weight: 0.4
+      hidden_size: 256
+      num_layers: 2
+      
+    transformer:
+      enabled: true
+      weight: 0.3
+      d_model: 512
+      nhead: 8
+      num_layers: 6
+  
+  # 앙상블 설정
+  ensemble:
+    voting_method: weighted  # weighted, majority
+    confidence_threshold: 0.8
+  
+  # 학습 설정
+  training:
+    batch_size: 32
+    learning_rate: 0.001
+    epochs: 100
+    early_stopping_patience: 10
+
+# 레이아웃 분석 설정
+layout:
+  # 텍스트 영역 검출
+  text_detection:
+    min_area: 100
+    max_area: 100000
+    aspect_ratio_range: [0.1, 10]
+  
+  # 테이블 검출
+  table_detection:
+    min_line_length: 100
+    min_cells: 4
+    line_gap: 20
+    
+  # 필드 매핑
+  field_mapping:
+    personal_info:
+      - 성명
+      - 학번
+      - 생년월일
+      - 주소
+    academic_info:
+      - 학년
+      - 반
+      - 번호
+      - 담임
+    grades:
+      - 교과
+      - 과목
+      - 성적
+      - 등급
+    activities:
+      - 창의적체험활동
+      - 봉사활동
+      - 동아리활동
+
+# 후처리 설정
+postprocessing:
+  # 맞춤법 검사
+  spell_checking:
+    enabled: true
+    use_dictionary: true
+    auto_correct: true
+    
+  # 띄어쓰기 교정
+  spacing:
+    enabled: true
+    use_ml_model: false
+    
+  # 특수 패턴 교정
+  pattern_correction:
+    enabled: true
+    patterns:
+      - {from: "숩니다", to: "습니다"}
+      - {from: "슴니다", to: "습니다"}
+      - {from: "됬", to: "됐"}
+
+# API 서버 설정
+api:
+  host: 0.0.0.0
+  port: 8000
+  workers: 4
+  reload: false
+  log_level: info
+  
+  # CORS 설정
+  cors:
+    allow_origins: ["*"]
+    allow_methods: ["*"]
+    allow_headers: ["*"]
+  
+  # 제한 설정
+  limits:
+    max_file_size: 10485760  # 10MB
+    max_batch_size: 20
+    request_timeout: 300  # 5분
+    
+  # 캐싱 설정
+  cache:
+    enabled: true
+    backend: memory  # memory, redis
+    ttl: 3600  # 1시간
+
+# 웹 인터페이스 설정
+web:
+  host: localhost
+  port: 8501
+  theme: light
+  max_upload_size: 200  # MB
+  
+  # UI 설정
+  ui:
+    show_confidence: true
+    show_layout: true
+    show_fields: true
+    enable_batch_mode: true
+
+# 로깅 설정
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: logs/korean_ocr.log
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# 성능 모니터링
+monitoring:
+  enabled: true
+  metrics:
+    - processing_time
+    - accuracy
+    - confidence
+    - memory_usage
+    - cpu_usage
+  
+  # 알림 설정
+  alerts:
+    low_accuracy_threshold: 0.9
+    high_processing_time: 5.0  # 초
+
+# 데이터베이스 설정
+database:
+  # Redis (캐싱)
+  redis:
+    enabled: false
+    host: localhost
+    port: 6379
+    db: 0
+    
+  # MongoDB (결과 저장)
+  mongodb:
+    enabled: false
+    host: localhost
+    port: 27017
+    database: korean_ocr
+    collection: results
+
+# 벤치마크 설정
+benchmark:
+  test_dataset_path: ./data/test
+  output_path: ./reports
+  
+  # 평가 지표
+  metrics:
+    - character_accuracy
+    - word_accuracy
+    - levenshtein_distance
+    - processing_time
+    - confidence
+  
+  # 목표 성능
+  targets:
+    accuracy: 0.99
+    processing_time: 2.0
+    confidence: 0.95

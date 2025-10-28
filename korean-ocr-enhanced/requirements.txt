@@ -1,0 +1,70 @@
+# PaddleOCR and PaddlePaddle
+paddlepaddle==2.6.0
+paddleocr==2.7.3
+
+# Image Processing
+opencv-python==4.9.0.80
+opencv-contrib-python==4.9.0.80
+Pillow==10.2.0
+scikit-image==0.22.0
+albumentations==1.4.0
+
+# Deep Learning Enhancement
+torch==2.2.0
+torchvision==0.17.0
+transformers==4.37.2
+
+# Korean NLP
+konlpy==0.6.0
+soynlp==0.0.493
+kiwipiepy==0.18.0
+hanja==0.13.3
+
+# Data Processing
+numpy==1.24.3
+pandas==2.1.4
+scipy==1.11.4
+
+# Text Processing
+python-Levenshtein==0.25.0
+rapidfuzz==3.6.1
+regex==2023.12.25
+jamo==0.4.1
+
+# Web Framework
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+streamlit==1.30.0
+
+# Utilities
+pyyaml==6.0.1
+tqdm==4.66.1
+colorama==0.4.6
+python-dotenv==1.0.0
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+
+# Monitoring
+psutil==5.9.7
+gputil==1.4.0
+
+# Database (for result caching)
+redis==5.0.1
+pymongo==4.6.1
+
+# Image Enhancement AI
+super-image==0.1.7
+basicsr==1.4.2
+
+# PDF Processing
+PyPDF2==3.0.1
+pdf2image==1.17.0
+pdfplumber==0.10.3
+
+# Additional Korean Processing
+hangul-romanize==0.1.0
