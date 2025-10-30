@@ -20,7 +20,21 @@ export function Navigation() {
       if (typeof window !== "undefined") {
         const currentAnalysis = sessionStorage.getItem("current_analysis")
         const isAnalyzing = sessionStorage.getItem("is_analyzing") === "true"
-        setHasResults(!!currentAnalysis && isAnalyzing)
+        
+        // 🔴 PHASE 10: 완전 재설계된 분석 탭 아이콘 로직
+        // 세션 기반 로직: 앱 종료 시 아이콘 숨김, 업로드 후에만 표시
+        // sessionStorage는 탭/창 닫으면 자동 삭제됨
+        
+        // sessionStorage에 'has_uploaded' 플래그가 있는지 확인
+        const hasUploadedInSession = sessionStorage.getItem("has_uploaded_in_session") === "true"
+        
+        // Show analysis icon ONLY if:
+        // 1. User has uploaded in THIS session (has_uploaded_in_session=true), OR
+        // 2. Currently analyzing (is_analyzing=true with current_analysis)
+        const shouldShowAnalysisIcon = hasUploadedInSession || (!!currentAnalysis && isAnalyzing)
+        setHasResults(shouldShowAnalysisIcon)
+        
+        console.log(`[Navigation PHASE 10] Analysis icon: ${shouldShowAnalysisIcon} (uploaded: ${hasUploadedInSession}, analyzing: ${isAnalyzing})`)
       }
     }
 
@@ -38,34 +52,26 @@ export function Navigation() {
     }
     window.addEventListener('analysisStateChange', handleAnalysisChange)
     
-    // Check on pathname change
-    checkResults()
+    // Check on pathname change with slight delay to avoid flickering (UX-03)
+    const timeoutId = setTimeout(checkResults, 50)
     
     return () => {
       window.removeEventListener('analysisStateChange', handleAnalysisChange)
+      clearTimeout(timeoutId)
     }
   }, [pathname])
 
   useEffect(() => {
-    // Show profile icon ONLY on home (without results) and explore pages
+    // 🔴 CRITICAL FIX: 프로필 아이콘은 메인홈+탐색탭에서 항상 표시 (모든 조건 제거)
     const isHomePage = pathname === "/"
     const isExplorePage = pathname === "/explore"
-    const isResultsScreen = pathname === "/results" || pathname.startsWith("/results/")
     
-    // Check if currently analyzing (uploading, ocr, analyzing phases)
-    const isAnalyzing = typeof window !== 'undefined' && sessionStorage.getItem("is_analyzing") === "true"
+    // 프로필은 홈 또는 탐색 페이지에서 무조건 표시 (hasResults, isModalOpen 무관)
+    const shouldShowProfile = isHomePage || isExplorePage
+    setShowProfileIcon(shouldShowProfile)
     
-    // CRITICAL: Profile should ONLY show on:
-    // 1. Home page WITHOUT results AND NOT analyzing
-    // 2. Explore page ONLY
-    // Hide when: analyzing, showing results, on results page, or modal open
-    // NEVER show during analysis or when results exist
-    const shouldShowProfile = isExplorePage || (isHomePage && !hasResults && !isAnalyzing)
-    const finalVisibility = shouldShowProfile && !isModalOpen && !isResultsScreen && !hasResults && !isAnalyzing
-    setShowProfileIcon(finalVisibility)
-    
-    console.log(`[Navigation] Profile: ${finalVisibility} (path: ${pathname}, hasResults: ${hasResults}, analyzing: ${isAnalyzing})`)
-  }, [pathname, hasResults, isModalOpen])
+    console.log(`[Navigation CRITICAL FIX] Profile: ${shouldShowProfile} (path: ${pathname})`)
+  }, [pathname])
   
   useEffect(() => {
     // Listen for modal state changes
@@ -125,21 +131,44 @@ export function Navigation() {
   const handleNavClick = (e: React.MouseEvent, item: any) => {
     e.preventDefault()
     
-    // Home button: clear analysis state and go to clean home
+    // FIX: Direct navigation without flickering third tab
+    // Immediately update active state to prevent ghost highlighting
+    
+    // 🔴 CRITICAL FIX: Home button - 상태 업데이트 먼저, 네비게이션 나중에
     if (item.isHome) {
+      // Clear all analysis-related session storage
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('is_analyzing')
         sessionStorage.removeItem('current_analysis')
+        sessionStorage.removeItem('analysis_phase')
+        sessionStorage.removeItem('ocr_progress')
+        
+        // Check if user has uploaded in this session
+        const hasUploaded = sessionStorage.getItem('has_uploaded_in_session') === 'true'
+        
+        // 🔴 CRITICAL FIX: 즉시 상태 업데이트
+        setHasResults(hasUploaded)
+        
+        // Dispatch event
         window.dispatchEvent(new CustomEvent('analysisStateChange', {
-          detail: { hasResults: false }
+          detail: { hasResults: hasUploaded }
         }))
+        
+        console.log(`[Navigation CRITICAL FIX] 홈 버튼: hasResults=${hasUploaded}, pathname=${pathname}`)
       }
-      router.push('/')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      
+      // 🔴 CRITICAL FIX: 항상 네비게이션 실행 (조건 없이)
+      if (pathname !== '/') {
+        console.log('[Navigation CRITICAL FIX] 홈으로 이동 실행')
+        router.push('/')
+      } else {
+        console.log('[Navigation CRITICAL FIX] 이미 홈 - 스크롤만')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
       return
     }
     
-    // Analysis button: scroll to results on current page
+    // Analysis button: scroll to results
     if (item.isAnalysis) {
       if (pathname === '/') {
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -149,13 +178,16 @@ export function Navigation() {
       return
     }
     
-    // Other buttons: normal navigation
-    router.push(item.href)
+    // Other buttons: direct navigation only to target
+    if (pathname !== item.href) {
+      router.push(item.href)
+    }
   }
 
   return (
     <>
-      {user?.isGuest && showProfileIcon && !hasResults && pathname === "/explore" && (
+      {/* 🔴 CRITICAL FIX: 프로필 아이콘 - 홈과 탐색 페이지에서 무조건 표시 */}
+      {user?.isGuest && showProfileIcon && (
         <div className="fixed top-4 right-4 z-50">
           <motion.button
             onClick={handleGuestProfileClick}
@@ -169,8 +201,9 @@ export function Navigation() {
         </div>
       )}
 
+      {/* 🔴 PHASE 11: Mobile-optimized navigation with touch targets */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 pb-safe pointer-events-none">
-        <div className="backdrop-blur-xl bg-white/98 border-t border-gray-200 shadow-[0_-2px_16px_rgba(0,0,0,0.04)] px-3 py-1.5 safe-area-inset-bottom pointer-events-auto">
+        <div className="backdrop-blur-xl bg-white/98 border-t border-gray-200 shadow-[0_-2px_16px_rgba(0,0,0,0.04)] px-3 py-1.5 safe-area-inset-bottom pointer-events-auto fixed-bottom-nav">
           <div className="flex items-center justify-around max-w-md mx-auto gap-1.5">
             <AnimatePresence mode="popLayout">
               {navItems.map((item) => {
@@ -191,18 +224,19 @@ export function Navigation() {
                     }}
                     className="flex-1"
                   >
-                    <button onClick={(e) => handleNavClick(e, item)} className="block w-full">
+                    {/* 🔴 PHASE 11: Touch-optimized button with larger tap target */}
+                    <button onClick={(e) => handleNavClick(e, item)} className="block w-full min-h-[48px]">
                       <motion.div
                         whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
+                        whileTap={{ scale: 0.95 }}
                         className={cn(
-                          "relative px-3 py-1.5 rounded-xl transition-all duration-200 flex flex-col items-center gap-0.5",
+                          "relative px-3 py-2 rounded-xl transition-all duration-200 flex flex-col items-center gap-0.5 min-h-[44px] justify-center",
                           isActive
                             ? "bg-gray-900 text-white shadow-md"
                             : "text-gray-600 hover:text-gray-900 hover:bg-gray-100",
                         )}
                       >
-                        <Icon className="w-4 h-4" />
+                        <Icon className="w-5 h-5" />
                         <span className="text-[10px] font-medium">{item.label}</span>
                       </motion.div>
                     </button>

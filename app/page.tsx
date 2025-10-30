@@ -29,17 +29,25 @@ import {
   User,
   History,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react"
 import { StorageManager } from "@/components/storage-manager"
 import type { AnalysisResult } from "@/lib/types"
-import { extractTextFromImage } from "@/lib/ocr"
-import { TeacherCommunicationHelper } from "@/components/teacher-communication-helper"
-import { AIKillerDetector } from "@/components/ai-killer-detector"
-import { UniversityPredictor } from "@/components/university-predictor"
-import { ProjectRecommender } from "@/components/project-recommender"
+// 🔴 PHASE 2: Enhanced OCR with detailed progress tracking
+import { extractTextFromImage } from "@/lib/ocr-enhanced"
 import { useAuth } from "@/lib/auth-context"
 import { AuthGuard } from "@/components/auth-guard"
-import { NotificationCenter } from "@/components/notification-center"
+import { StackedImageCards } from "@/components/stacked-image-cards"
+import { getUserStudentId, getUserDisplayName, initUserSession } from "@/lib/user-session"
+import { compressImage } from "@/lib/image-optimization"
+// Performance: Lazy load heavy components
+import {
+  LazyTeacherCommunicationHelper,
+  LazyAIKillerDetector,
+  LazyUniversityPredictor,
+  LazyProjectRecommender,
+  LazyNotificationCenter,
+} from "@/lib/lazy-components"
 
 type Phase = "idle" | "uploading" | "ocr" | "analyzing" | "analysisComplete" | "complete"
 type ResultTab = "strengths" | "improvements"
@@ -68,39 +76,66 @@ const PROGRESS_MESSAGES = {
   ],
 }
 
-// Helper function to get consistent user-specific student ID
-const getUserStudentId = (): string => {
-  if (typeof window === 'undefined') return '0000'
-  
-  // Try to get from sessionStorage (user's actual student ID)
-  const storedStudentId = sessionStorage.getItem('student_id')
-  if (storedStudentId && storedStudentId.length === 4) {
-    return storedStudentId
-  }
-  
-  // Generate consistent ID based on user session (NOT per analysis)
-  const userSessionId = sessionStorage.getItem('user_session_id') || ''
-  if (userSessionId) {
-    // Hash the session ID to get consistent 4 digits for this user
-    let hash = 0
-    for (let i = 0; i < userSessionId.length; i++) {
-      hash = ((hash << 5) - hash) + userSessionId.charCodeAt(i)
-      hash = hash & hash // Convert to 32bit integer
-    }
-    const fourDigits = String(Math.abs(hash) % 10000).padStart(4, '0')
-    return fourDigits
-  }
-  
-  return '0000'
+// LB-10: Using global user session management
+// getUserStudentId() is now imported from @/lib/user-session
+
+// Helper function to generate AI-based titles for analysis history  
+const generateAnalysisTitle = (analysis: AnalysisResult, index: number): string => {
+  // LB-10: Use global getUserDisplayName for consistent naming
+  const displayName = getUserDisplayName()
+  // 🔴 FIX: Student → 학생 변환
+  return displayName.replace(/Student(\d+)/g, '학생$1')
 }
 
-// Helper function to generate AI-based titles for analysis history
-const generateAnalysisTitle = (analysis: AnalysisResult, index: number): string => {
-  const studentId = getUserStudentId() // Use consistent user ID
-  if (analysis.studentName && analysis.studentName.trim()) {
-    return `학생${studentId}`
+// 🔴 NEW: AI가 생기부 내용을 기반으로 학과/분야 키워드 추정
+const generateAIKeyword = (analysis: AnalysisResult): string => {
+  // 진로방향이 있으면 우선 사용
+  if (analysis.careerDirection && analysis.careerDirection.trim()) {
+    return analysis.careerDirection
   }
-  return `학생${studentId}`
+  
+  // 생기부 내용 기반 키워드 추정
+  const originalText = analysis.originalText?.toLowerCase() || ''
+  
+  // 이공계열 키워드
+  if (originalText.includes('공학') || originalText.includes('과학') || originalText.includes('수학') || originalText.includes('물리') || originalText.includes('화학')) {
+    if (originalText.includes('컴퓨터') || originalText.includes('소프트웨어') || originalText.includes('프로그래밍') || originalText.includes('코딩')) {
+      return '컴퓨터공학과'
+    }
+    if (originalText.includes('기계') || originalText.includes('로봇')) {
+      return '기계공학과'
+    }
+    if (originalText.includes('전기') || originalText.includes('전자')) {
+      return '전자공학과'
+    }
+    return '이공계열'
+  }
+  
+  // 의학계열
+  if (originalText.includes('의학') || originalText.includes('간호') || originalText.includes('보건') || originalText.includes('병원') || originalText.includes('의사')) {
+    if (originalText.includes('간호')) {
+      return '간호학과'
+    }
+    return '의예과'
+  }
+  
+  // 경영/경제
+  if (originalText.includes('경영') || originalText.includes('경제') || originalText.includes('사업') || originalText.includes('마케팅')) {
+    return '경영학과'
+  }
+  
+  // 인문계열
+  if (originalText.includes('문학') || originalText.includes('역사') || originalText.includes('철학') || originalText.includes('언어')) {
+    return '인문계열'
+  }
+  
+  // 예체능
+  if (originalText.includes('미술') || originalText.includes('음악') || originalText.includes('체육') || originalText.includes('디자인')) {
+    return '예체능계열'
+  }
+  
+  // 기본값
+  return '종합계열'
 }
 
 // Helper function for smart time display
@@ -148,6 +183,7 @@ export default function HomePage() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [uploadedImageUrls, setUploadedImageUrls] = useState<string[]>([])
   const [careerDirection, setCareerDirection] = useState("")
+  const [careerDirectionExpanded, setCareerDirectionExpanded] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [shareData, setShareData] = useState({ studentId: "", name: "", agreedToTerms: false, isPrivate: false })
@@ -171,13 +207,10 @@ export default function HomePage() {
   const [progressMessage, setProgressMessage] = useState("")
   const [currentTip, setCurrentTip] = useState("")
   const [resultTab, setResultTab] = useState<ResultTab>("strengths")
+  // LB-10: Initialize user session using global function
   const [userSessionId] = useState(() => {
     if (typeof window !== "undefined") {
-      let sessionId = sessionStorage.getItem("user_session_id")
-      if (!sessionId) {
-        sessionId = "user-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9)
-        sessionStorage.setItem("user_session_id", sessionId)
-      }
+      const sessionId = initUserSession()
       const storedStudentId = sessionStorage.getItem("student_id")
       const storedName = sessionStorage.getItem("student_name")
       if (storedStudentId && storedName) {
@@ -194,9 +227,17 @@ export default function HomePage() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
 
   useEffect(() => {
-    // Load from history (not from shared analyses)
-    const history = StorageManager.getAnalysisHistory()
-    setAnalysisHistory(history.slice(0, 3)) // Show最近 3 items
+    // CRITICAL FIX: Load history on mount AND keep it updated
+    const loadHistory = () => {
+      const history = StorageManager.getAnalysisHistory()
+      // Sort by upload date (latest first) and take top 3
+      const sorted = history.sort((a, b) => 
+        new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()
+      )
+      setAnalysisHistory(sorted.slice(0, 3))
+    }
+    
+    loadHistory()
     
     // Also check for existing analysis state
     const checkAnalysisState = () => {
@@ -211,10 +252,20 @@ export default function HomePage() {
     }
     checkAnalysisState()
     
-    // Listen for analysis state changes
-    const handleStateChange = () => checkAnalysisState()
+    // Listen for analysis state changes AND history updates
+    const handleStateChange = () => {
+      checkAnalysisState()
+      loadHistory() // Reload history when state changes
+    }
     window.addEventListener("analysisStateChange", handleStateChange)
-    return () => window.removeEventListener("analysisStateChange", handleStateChange)
+    
+    // Also listen for storage changes (for cross-tab sync)
+    window.addEventListener("storage", loadHistory)
+    
+    return () => {
+      window.removeEventListener("analysisStateChange", handleStateChange)
+      window.removeEventListener("storage", loadHistory)
+    }
   }, [userSessionId])
 
   useEffect(() => {
@@ -270,15 +321,38 @@ export default function HomePage() {
     }
   }, [phase])
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const files = Array.from(e.target.files)
-      setUploadedFiles(files)
+      
+      // Performance: Compress images before upload
+      console.log("[Upload] Compressing images...")
+      const compressedFiles = await Promise.all(
+        files.map(async (file) => {
+          if (file.type.startsWith('image/')) {
+            try {
+              const compressed = await compressImage(file, {
+                maxWidth: 1920,
+                maxHeight: 1080,
+                quality: 0.85,
+              })
+              console.log(`[Upload] ${file.name}: ${(file.size / 1024).toFixed(1)}KB → ${(compressed.size / 1024).toFixed(1)}KB`)
+              return compressed
+            } catch (error) {
+              console.warn(`[Upload] Failed to compress ${file.name}, using original`)
+              return file
+            }
+          }
+          return file
+        })
+      )
+      
+      setUploadedFiles(compressedFiles)
 
-      const urls = files.map((file) => URL.createObjectURL(file))
+      const urls = compressedFiles.map((file) => URL.createObjectURL(file))
       setUploadedImageUrls(urls)
 
-      startAnalysis(files)
+      startAnalysis(compressedFiles)
     }
   }
 
@@ -294,15 +368,22 @@ export default function HomePage() {
 
     if (typeof window !== "undefined") {
       sessionStorage.setItem("is_analyzing", "true")
-      // Dispatch event to hide profile icon and update navigation
+      // 🔴 PHASE 10: 이미지 업로드 시 세션 플래그 설정
+      sessionStorage.setItem("has_uploaded_in_session", "true")
+      // Dispatch event to show analysis icon in navigation
       window.dispatchEvent(new CustomEvent("analysisStateChange", {
-        detail: { hasResults: false }
+        detail: { hasResults: true }
       }))
+      console.log("[Page PHASE 10] 📤 업로드 완료 - 분석 아이콘 활성화")
     }
 
+    // 🔴 FIX: 진행도 0%부터 시작
+    setOcrProgress(0)
     setPhase("uploading")
     setProgressMessage("파일을 업로드하는 중이에요.")
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    
+    // 🔴 FIX: 업로드 단계 정확히 1.5초 딜레이 후 체크
+    await new Promise((resolve) => setTimeout(resolve, 1500))
 
     setPhase("ocr")
     setProgressMessage(PROGRESS_MESSAGES.ocr[0])
@@ -457,8 +538,16 @@ export default function HomePage() {
     // Save to history immediately (even without sharing)
     StorageManager.saveToHistory(analysisResult)
     
-    // Reload history to show in "나의 최근 활동"
-    setAnalysisHistory(StorageManager.getAnalysisHistory().slice(0, 3))
+    // Reload history to show in "나의 최근 활동" (sorted by date)
+    const updatedHistory = StorageManager.getAnalysisHistory()
+      .sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime())
+      .slice(0, 3)
+    setAnalysisHistory(updatedHistory)
+    
+    // Notify navigation to show analysis icon
+    window.dispatchEvent(new CustomEvent("analysisStateChange", {
+      detail: { hasResults: true }
+    }))
   }
 
   const handleShareClick = () => {
@@ -575,13 +664,14 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 
   return (
     <AuthGuard>
-      <div className={`relative h-screen w-screen bg-gray-50 ${isFixedScreen ? "overflow-hidden" : ""}`}>
+      {/* 🔴 PHASE 11: Mobile-optimized layout with iOS Safari fixes */}
+      <div className={`relative h-screen w-screen bg-gray-50 ios-fix-vh ${isFixedScreen ? "overflow-hidden" : ""}`}>
         <LiquidBackground />
         <Navigation />
-        {user && !user.isGuest && <NotificationCenter />}
+        {user && !user.isGuest && <LazyNotificationCenter />}
 
         <div
-          className={`relative z-10 h-full px-4 pt-3 pb-20 ${
+          className={`relative z-10 h-full px-4 pt-3 pb-20 mobile-compact mobile-scroll ${
             isFixedScreen ? "overflow-hidden flex flex-col items-center justify-center" : "overflow-y-auto"
           }`}
         >
@@ -593,7 +683,7 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
               className="text-center mb-3"
             >
               <h1 className="text-2xl font-bold tracking-tight text-gray-900 mb-0.5" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif' }}>사상고 생기부AI</h1>
-              <p className="text-xs text-gray-500 font-normal">학생 생활기록부 AI 탐지기</p>
+              <p className="text-xs text-gray-500 font-normal">학생 생활기록부 AI작성 탐지기</p>
             </motion.div>
           )}
 
@@ -608,19 +698,72 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                   transition={{ duration: 0.3 }}
                   className="space-y-3"
                 >
-                  <GlassCard className="p-2 space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <Compass className="w-3 h-3 text-blue-600" />
-                      <h3 className="text-[11px] font-semibold text-gray-900">진로방향 설계</h3>
-                    </div>
-                    <p className="text-[9px] text-gray-600">나의 진학목표를 입력시 더 정밀한 분석을 받아볼수있어요.</p>
-                    <Input
-                      placeholder=""
-                      value={careerDirection}
-                      onChange={(e) => setCareerDirection(e.target.value)}
-                      className="h-6 text-xs"
-                    />
-                  </GlassCard>
+                  {/* 🔴 SMOOTH ANIMATION: 진로방향 박스 - 부드러운 열기/닫기 */}
+                  <motion.div
+                    initial={false}
+                    animate={{ 
+                      height: careerDirectionExpanded ? "120px" : "36px",
+                      width: careerDirectionExpanded ? "100%" : "auto",
+                      opacity: 1
+                    }}
+                    transition={{ 
+                      duration: 0.35, 
+                      ease: [0.25, 0.1, 0.25, 1], // 더 부드러운 cubic-bezier
+                      height: { duration: 0.35 },
+                      width: { duration: 0.3 }
+                    }}
+                    className="overflow-hidden mx-auto"
+                    style={{ 
+                      maxWidth: careerDirectionExpanded ? "100%" : "280px",
+                      willChange: "height, width"
+                    }}
+                  >
+                    <GlassCard className="p-2 space-y-1 shadow-md border-2 border-blue-100/50">
+                      <button
+                        onClick={() => setCareerDirectionExpanded(!careerDirectionExpanded)}
+                        className="w-full flex items-center justify-between gap-2 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 rounded-lg px-2 py-1 transition-all duration-300"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Compass className="w-3.5 h-3.5 text-blue-600" />
+                          <h3 className="text-[11px] font-bold text-gray-900">진로방향</h3>
+                          {careerDirection && !careerDirectionExpanded && (
+                            <span className="text-[9px] text-blue-600 font-semibold truncate max-w-[140px] bg-blue-50 px-2 py-0.5 rounded-full">
+                              {careerDirection}
+                            </span>
+                          )}
+                        </div>
+                        <motion.div
+                          animate={{ rotate: careerDirectionExpanded ? 180 : 0 }}
+                          transition={{ duration: 0.3, ease: "easeInOut" }}
+                        >
+                          <ChevronDown className="w-3.5 h-3.5 text-blue-600" />
+                        </motion.div>
+                      </button>
+                      
+                      <AnimatePresence mode="wait">
+                        {careerDirectionExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                            transition={{ 
+                              duration: 0.25,
+                              ease: [0.25, 0.1, 0.25, 1]
+                            }}
+                            className="space-y-1 pt-1"
+                          >
+                            <p className="text-[9px] text-gray-600 leading-relaxed">나의 진학목표를 입력시 더 정밀한 분석을 받아볼수있어요.</p>
+                            <Input
+                              placeholder="희망학과를 입력해주세요"
+                              value={careerDirection}
+                              onChange={(e) => setCareerDirection(e.target.value)}
+                              className="h-7 text-xs placeholder:text-gray-400 placeholder:opacity-50"
+                            />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </GlassCard>
+                  </motion.div>
 
                   <GlassCard className="w-full p-5 text-center space-y-3.5" glow>
                     <motion.div
@@ -682,11 +825,11 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                                     <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
                                     <span className="text-[10px] text-gray-500 whitespace-nowrap">{timeDisplay}</span>
                                   </div>
+                                  {/* 🔴 FIX: 종합점수 대신 AI 키워드 표시 */}
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-[11px] font-medium text-gray-700">종합 {analysis.overallScore}점</span>
-                                    {analysis.careerDirection && (
-                                      <span className="text-[10px] text-gray-500 truncate">• {analysis.careerDirection}</span>
-                                    )}
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800 border border-blue-200">
+                                      {generateAIKeyword(analysis)}
+                                    </span>
                                   </div>
                                 </div>
                                 <Button
@@ -748,16 +891,35 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                               style={{ width: `${ocrProgress}%` }}
                               transition={{ duration: 0.2, ease: "easeOut" }}
                             >
+                              {/* 🔴 PHASE 5: Enhanced loading shimmer - seamless infinite loop */}
                               <motion.div
-                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
                                 animate={{
                                   x: ["-100%", "200%"],
                                 }}
                                 transition={{
-                                  duration: 1.2,
+                                  duration: 1.5,
                                   repeat: Infinity,
                                   ease: "linear",
                                   repeatType: "loop",
+                                  repeatDelay: 0, // 🔴 No gap between loops
+                                }}
+                                style={{
+                                  willChange: "transform",
+                                }}
+                              />
+                              {/* 🔴 PHASE 5: Secondary shimmer for depth */}
+                              <motion.div
+                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                                animate={{
+                                  x: ["-100%", "200%"],
+                                }}
+                                transition={{
+                                  duration: 2.2,
+                                  repeat: Infinity,
+                                  ease: "linear",
+                                  repeatType: "loop",
+                                  repeatDelay: 0,
                                 }}
                                 style={{
                                   willChange: "transform",
@@ -767,20 +929,126 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                           </div>
                         )}
                         {phase === "analyzing" && (
-                          <div className="flex justify-center py-2">
-                            <motion.div
-                              className="w-8 h-8 border-4 border-gray-200 border-t-gray-800 rounded-full"
-                              animate={{ rotate: [0, 360] }}
-                              transition={{
-                                duration: 0.8,
-                                repeat: Infinity,
-                                ease: "linear",
-                              }}
-                              style={{
-                                willChange: "transform",
-                                transformOrigin: "center center",
-                              }}
-                            />
+                          <div className="flex justify-center py-4">
+                            {/* 🔴 UX REDESIGN: AI Scanning Animation - 스캐닝 느낌의 AI 분석 애니메이션 */}
+                            <div className="relative w-32 h-32">
+                              {/* 중앙 스캔 코어 - Brain Icon */}
+                              <motion.div
+                                className="absolute inset-0 flex items-center justify-center"
+                                animate={{
+                                  scale: [1, 1.05, 1],
+                                }}
+                                transition={{
+                                  duration: 2,
+                                  repeat: Infinity,
+                                  ease: "easeInOut",
+                                }}
+                              >
+                                <div className="relative w-14 h-14 bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500 rounded-2xl shadow-2xl flex items-center justify-center">
+                                  {/* Brain/AI Icon SVG */}
+                                  <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                  </svg>
+                                </div>
+                              </motion.div>
+                              
+                              {/* Horizontal Scanning Lines - 상하로 이동하는 스캔선들 */}
+                              {[0, 1, 2, 3, 4].map((i) => (
+                                <motion.div
+                                  key={`scan-${i}`}
+                                  className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent"
+                                  style={{
+                                    filter: 'blur(1px)',
+                                  }}
+                                  animate={{
+                                    top: ['0%', '100%'],
+                                    opacity: [0, 1, 1, 0],
+                                  }}
+                                  transition={{
+                                    duration: 2,
+                                    repeat: Infinity,
+                                    ease: "linear",
+                                    delay: i * 0.4,
+                                  }}
+                                />
+                              ))}
+
+                              
+                              {/* Rotating Radar Sweep - 회전하는 레이더 스윕 */}
+                              <motion.div
+                                className="absolute inset-0"
+                                animate={{
+                                  rotate: [0, 360],
+                                }}
+                                transition={{
+                                  duration: 3,
+                                  repeat: Infinity,
+                                  ease: "linear",
+                                }}
+                              >
+                                <div 
+                                  className="absolute top-1/2 left-1/2 w-full h-0.5 origin-left"
+                                  style={{
+                                    background: 'linear-gradient(90deg, rgba(59, 130, 246, 0.8) 0%, rgba(59, 130, 246, 0) 100%)',
+                                    transform: 'translateY(-50%)',
+                                    filter: 'blur(2px)',
+                                  }}
+                                />
+                              </motion.div>
+                              
+                              {/* Data Points - 스캔된 데이터 포인트들 */}
+                              {[0, 1, 2, 3, 4, 5].map((i) => {
+                                const angle = (i * Math.PI * 2) / 6;
+                                const radius = 45;
+                                return (
+                                  <motion.div
+                                    key={`data-${i}`}
+                                    className="absolute w-2 h-2 bg-cyan-400 rounded-full shadow-lg"
+                                    style={{
+                                      left: '50%',
+                                      top: '50%',
+                                      marginLeft: Math.cos(angle) * radius - 4,
+                                      marginTop: Math.sin(angle) * radius - 4,
+                                    }}
+                                    animate={{
+                                      scale: [0.8, 1.3, 0.8],
+                                      opacity: [0.4, 1, 0.4],
+                                    }}
+                                    transition={{
+                                      duration: 2,
+                                      repeat: Infinity,
+                                      ease: "easeInOut",
+                                      delay: i * 0.2,
+                                    }}
+                                  />
+                                );
+                              })}
+
+                              
+                              {/* Scanning Rings - 확산되는 스캔 링들 */}
+                              {[0, 1, 2].map((ring) => (
+                                <motion.div
+                                  key={`ring-${ring}`}
+                                  className="absolute inset-0"
+                                  animate={{
+                                    scale: [0.5, 1.5],
+                                    opacity: [0.8, 0],
+                                  }}
+                                  transition={{
+                                    duration: 2.5,
+                                    repeat: Infinity,
+                                    ease: "easeOut",
+                                    delay: ring * 0.8,
+                                  }}
+                                >
+                                  <div className="absolute inset-0 border border-blue-400 rounded-full" />
+                                </motion.div>
+                              ))}
+                              
+                              {/* Static Grid Ring - 정적 그리드 링 */}
+                              <div className="absolute inset-0 border border-dashed border-gray-300 rounded-full opacity-30" />
+                              <div className="absolute inset-0 border border-dashed border-gray-300 rounded-full opacity-20" style={{ transform: 'scale(0.65)' }} />
+                            </div>
                           </div>
                         )}
                       </GlassCard>
@@ -807,117 +1075,12 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                       </div>
 
                       {uploadedImageUrls.length > 0 && (
-                        <GlassCard className="p-2 relative overflow-visible rounded-2xl">
-                          <div className="relative h-72" style={{ perspective: '1000px' }}>
-                            {/* Stacked card style - back to front */}
-                            {uploadedImageUrls.map((url, index) => {
-                              const isCurrent = index === currentImageIndex
-                              const isPast = index < currentImageIndex
-                              const isFuture = index > currentImageIndex
-                              
-                              // Calculate position offset for stacked effect - more pronounced
-                              const offsetX = isFuture ? (index - currentImageIndex) * 20 : 0
-                              const offsetY = isFuture ? (index - currentImageIndex) * 12 : 0
-                              const scale = isCurrent ? 1 : 0.92 - ((index - currentImageIndex) * 0.03)
-                              const zIndex = isCurrent ? 50 : (isFuture ? (100 - index) : 0)
-                              const brightness = isCurrent ? 1 : 0.85
-                              
-                              return (
-                                <motion.div
-                                  key={url}
-                                  initial={false}
-                                  animate={{
-                                    x: offsetX,
-                                    y: offsetY,
-                                    scale: isPast ? 0 : scale,
-                                    opacity: isPast ? 0 : (isCurrent ? 1 : 0.7),
-                                    rotateY: isFuture ? (index - currentImageIndex) * 1.5 : 0,
-                                  }}
-                                  transition={{
-                                    type: "spring",
-                                    stiffness: 300,
-                                    damping: 28,
-                                    mass: 0.8,
-                                  }}
-                                  onClick={() => {
-                                    if (isFuture) {
-                                      setCurrentImageIndex(index)
-                                    }
-                                  }}
-                                  className="absolute inset-0 rounded-lg overflow-hidden shadow-lg cursor-pointer"
-                                  style={{
-                                    zIndex: zIndex,
-                                    transformStyle: 'preserve-3d',
-                                    pointerEvents: isCurrent || isFuture ? 'auto' : 'none',
-                                  }}
-                                >
-                                  <img
-                                    src={url || "/placeholder.svg"}
-                                    alt={`생기부 ${index + 1}페이지`}
-                                    className="w-full h-full object-contain transition-all duration-300"
-                                    style={{ 
-                                      filter: `brightness(${brightness}) contrast(1.02)`,
-                                    }}
-                                  />
-                                  
-                                  {/* Enhanced border highlight for back cards - more visible */}
-                                  {isFuture && (
-                                    <div className="absolute inset-0 border-2 border-blue-400/70 rounded-lg pointer-events-none shadow-lg" />
-                                  )}
-                                  
-                                  {/* Subtle glow on current card */}
-                                  {isCurrent && (
-                                    <div className="absolute inset-0 shadow-xl rounded-lg pointer-events-none" />
-                                  )}
-                                </motion.div>
-                              )
-                            })}
-                            
-                            {/* Subtle scan effect - Apple style */}
-                            <motion.div
-                              className="absolute inset-0 pointer-events-none rounded-lg"
-                              style={{
-                                background: 'linear-gradient(180deg, transparent 0%, rgba(59, 130, 246, 0.05) 45%, rgba(96, 165, 250, 0.08) 50%, rgba(59, 130, 246, 0.05) 55%, transparent 100%)',
-                                height: '30%',
-                                filter: 'blur(3px)',
-                                zIndex: 55,
-                              }}
-                              animate={{
-                                y: ["-40%", "140%"],
-                              }}
-                              transition={{
-                                duration: 3.5,
-                                repeat: Infinity,
-                                ease: [0.4, 0, 0.2, 1],
-                                repeatType: "loop",
-                              }}
-                            />
-                            
-                            {/* Minimal corner indicators - Apple style */}
-                            <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-gray-300/40 rounded-tl z-[55]" />
-                            <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-gray-300/40 rounded-tr z-[55]" />
-                            <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-gray-300/40 rounded-bl z-[55]" />
-                            <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-gray-300/40 rounded-br z-[55]" />
-                            
-                            {/* Subtle page indicator dots - Apple style */}
-                            {uploadedImageUrls.length > 1 && (
-                              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[60] flex gap-1.5">
-                                {uploadedImageUrls.map((_, idx) => (
-                                  <motion.div
-                                    key={idx}
-                                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                                      idx === currentImageIndex 
-                                        ? 'w-6 bg-blue-500' 
-                                        : 'w-1.5 bg-gray-300/60'
-                                    }`}
-                                    initial={{ scale: 0.8, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    transition={{ delay: idx * 0.05 }}
-                                  />
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                        <GlassCard className="p-4">
+                          {/* UX-09: Stacked Card UI with 3D effects and tap-to-view */}
+                          <StackedImageCards 
+                            imageUrls={uploadedImageUrls} 
+                            readonly={true}
+                          />
                         </GlassCard>
                       )}
 
@@ -935,12 +1098,11 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                         key="completion-popup"
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
+                        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
                         transition={{
                           type: "spring",
                           stiffness: 300,
                           damping: 25,
-                          duration: 0.4,
                         }}
                         className="flex items-center justify-center"
                       >
@@ -1137,7 +1299,7 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                     onClick={() => setShowAIKiller(true)}
                   >
                     <Shield className="w-4 h-4 mr-1.5" />
-                    AI 탐지
+                    AI작성 탐지
                   </Button>
 
                   <div className="flex flex-col gap-2 pt-1">
@@ -1215,7 +1377,7 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                           }
                         }}
                         maxLength={4}
-                        placeholder="예: 2401"
+                        placeholder=""
                         className="h-9 text-sm"
                       />
                     </div>
@@ -1225,6 +1387,7 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                       <Input
                         value={shareData.name}
                         onChange={(e) => setShareData({ ...shareData, name: e.target.value })}
+                        placeholder=""
                         className="h-9 text-sm"
                       />
                     </div>
@@ -1282,7 +1445,7 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
           )}
 
           {showTeacherHelper && selectedError && (
-            <TeacherCommunicationHelper
+            <LazyTeacherCommunicationHelper
               error={selectedError}
               onClose={() => {
                 setShowTeacherHelper(false)
@@ -1292,15 +1455,15 @@ ${analysisResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
           )}
 
           {showAIKiller && analysisResult && (
-            <AIKillerDetector analysisResult={analysisResult} onClose={() => setShowAIKiller(false)} />
+            <LazyAIKillerDetector analysisResult={analysisResult} onClose={() => setShowAIKiller(false)} />
           )}
 
           {showUniversityPredictor && analysisResult && (
-            <UniversityPredictor analysisResult={analysisResult} onClose={() => setShowUniversityPredictor(false)} />
+            <LazyUniversityPredictor analysisResult={analysisResult} onClose={() => setShowUniversityPredictor(false)} />
           )}
 
           {showProjectRecommender && analysisResult && (
-            <ProjectRecommender
+            <LazyProjectRecommender
               analysisResult={analysisResult}
               careerDirection={careerDirection}
               onClose={() => setShowProjectRecommender(false)}

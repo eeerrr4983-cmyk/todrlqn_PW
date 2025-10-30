@@ -25,3 +25,21 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python OCR Service
+ocr_service/__pycache__/
+ocr_service/*.pyc
+ocr_service/*.pyo
+ocr_service/*.pyd
+ocr_service/.Python
+ocr_service/env/
+ocr_service/venv/
+ocr_service/.venv/
+ocr_service/pip-log.txt
+ocr_service/pip-delete-this-directory.txt
+ocr_service/.pytest_cache/
+ocr_service/.coverage
+ocr_service/htmlcov/
+ocr_service/dist/
+ocr_service/build/
+ocr_service/*.egg-info/

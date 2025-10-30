@@ -10,7 +10,7 @@ interface OcrApiResponse {
 
 const DEFAULT_PROGRESS_MESSAGES = {
   uploading: "이미지를 업로드하는 중입니다...",
-  requesting: "OCR.space에서 텍스트를 추출하고 있어요...",
+  requesting: "PaddleOCR-VL로 텍스트를 추출하고 있어요...",
   complete: "텍스트 추출이 완료되었어요!",
 }
 
@@ -28,7 +28,7 @@ export async function extractTextFromImage(
   formData.append("files", imageFile)
 
   if (onProgress) {
-    onProgress({ status: "OCR.space 서버에 연결 중...", progress: 15 })
+    onProgress({ status: "PaddleOCR-VL 서버에 연결 중...", progress: 15 })
   }
 
   // Increase timeout and add abort controller
@@ -101,13 +101,28 @@ export async function extractTextFromMultipleImages(
   onProgress?: (fileIndex: number, progress: OCRProgress) => void,
 ): Promise<string[]> {
   const results: string[] = []
+  const totalFiles = imageFiles.length
+
+  console.log(`[OCR Multi] 총 ${totalFiles}개 파일 처리 시작`)
 
   for (let i = 0; i < imageFiles.length; i++) {
+    console.log(`[OCR Multi] 파일 ${i + 1}/${totalFiles} 처리 중: ${imageFiles[i].name}`)
+    
     const text = await extractTextFromImage(imageFiles[i], (progress) => {
-      onProgress?.(i, progress)
+      // Calculate overall progress considering all files
+      const overallProgress = ((i / totalFiles) * 100) + (progress.progress / totalFiles)
+      const status = `[${i + 1}/${totalFiles}] ${progress.status || ''}`
+      
+      onProgress?.(i, { 
+        status,
+        progress: Math.min(100, Math.round(overallProgress))
+      })
     })
+    
     results.push(text)
+    console.log(`[OCR Multi] 파일 ${i + 1}/${totalFiles} 완료 (${text.length} 글자)`)
   }
 
+  console.log(`[OCR Multi] 모든 파일 처리 완료`)
   return results
 }

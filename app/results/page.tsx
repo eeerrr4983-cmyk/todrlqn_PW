@@ -286,17 +286,17 @@ ${mockResult.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
             <Button
               variant="ghost"
               onClick={() => {
-                // Go back to results page (home with results showing)
+                // 🔴 UX FIX: Go back to main home page
                 router.push('/')
                 // Scroll to top
                 setTimeout(() => {
                   window.scrollTo({ top: 0, behavior: 'smooth' })
                 }, 100)
               }}
-              className="rounded-full hover:bg-gray-100 h-9 px-4 text-sm"
+              className="rounded-full hover:bg-gray-100 h-9 px-4 text-sm font-medium shadow-sm border border-gray-200"
             >
               <ArrowLeft className="w-4 h-4 mr-1.5" />
-              돌아가기
+              메인으로 돌아가기
             </Button>
 
             <div className="text-center space-y-2">

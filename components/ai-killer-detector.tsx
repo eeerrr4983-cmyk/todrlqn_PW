@@ -164,9 +164,9 @@ export function AIKillerDetector({ analysisResult, onClose }: AIKillerDetectorPr
                 <div className="space-y-3">
                   <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-purple-600" />
-                    탐지된 섹션 ({result.detectedSections.length}개)
+                    탐지된 섹션 ({result.detectedSections?.length || 0}개)
                   </h4>
-                  {result.detectedSections.map((section, idx) => (
+                  {(result.detectedSections || []).map((section, idx) => (
                     <GlassCard key={idx} className="p-4 space-y-3 rounded-2xl">
                       <div className="flex items-start justify-between">
                         <span className="text-xs text-gray-500">라인 {section.lineNumber}</span>
@@ -185,11 +185,11 @@ export function AIKillerDetector({ analysisResult, onClose }: AIKillerDetectorPr
                       <p className="text-sm text-gray-900 font-medium">"{section.content}"</p>
                       <p className="text-xs text-gray-600">{section.reason}.</p>
 
-                      {section.humanWritingIndicators.length > 0 && (
+                      {(section.humanWritingIndicators?.length || 0) > 0 && (
                         <div className="mt-1">
                           <p className="text-xs font-medium text-green-700 mb-0.5">✓ 인간 작성 지표:</p>
                           <div className="flex flex-wrap gap-1">
-                            {section.humanWritingIndicators.map((indicator, i) => (
+                            {(section.humanWritingIndicators || []).map((indicator, i) => (
                               <span
                                 key={i}
                                 className="text-[10px] px-2 py-0.5 bg-green-100/80 text-green-700 rounded-full"
@@ -201,11 +201,11 @@ export function AIKillerDetector({ analysisResult, onClose }: AIKillerDetectorPr
                         </div>
                       )}
 
-                      {section.aiWritingIndicators.length > 0 && (
+                      {(section.aiWritingIndicators?.length || 0) > 0 && (
                         <div className="mt-1">
                           <p className="text-xs font-medium text-orange-700 mb-0.5">⚠ AI 작성 지표:</p>
                           <div className="flex flex-wrap gap-1">
-                            {section.aiWritingIndicators.map((indicator, i) => (
+                            {(section.aiWritingIndicators || []).map((indicator, i) => (
                               <span
                                 key={i}
                                 className="text-[10px] px-2 py-0.5 bg-orange-100/80 text-orange-700 rounded-full"
@@ -223,7 +223,7 @@ export function AIKillerDetector({ analysisResult, onClose }: AIKillerDetectorPr
                 <GlassCard className="p-4 space-y-1 rounded-2xl">
                   <h4 className="text-sm font-semibold text-gray-900">종합 의견</h4>
                   <ul className="space-y-0.5">
-                    {result.recommendations.map((rec, idx) => (
+                    {(result.recommendations || []).map((rec, idx) => (
                       <li key={idx} className="text-xs text-gray-700 leading-relaxed">
                         • {rec}
                       </li>

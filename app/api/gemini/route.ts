@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { getModelForTask, globalCostTracker } from "@/lib/ai-model-router"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
@@ -11,8 +12,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "서버에 Gemini API 키가 설정되지 않았습니다." }, { status: 500 })
     }
 
+    // 🧠 하이브리드 AI: 일반 작업은 task 타입에 따라 모델 선택
+    const selectedModel = getModelForTask({ 
+      type: task || 'general',
+      textLength: prompt?.length || 0
+    })
+    globalCostTracker.trackRequest(selectedModel)
+    console.log(`[Gemini] 🚀 ${selectedModel.name} 사용 (task: ${task})`)
+
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `${selectedModel.endpoint}?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: {
@@ -29,10 +38,10 @@ export async function POST(request: NextRequest) {
             },
           ],
           generationConfig: {
-            temperature: 0.7,
+            temperature: selectedModel.temperature,
             topK: 40,
             topP: 0.95,
-            maxOutputTokens: task === "name" ? 50 : task === "description" ? 200 : 1000,
+            maxOutputTokens: task === "name" ? 50 : task === "description" ? 200 : selectedModel.maxTokens,
           },
         }),
       },

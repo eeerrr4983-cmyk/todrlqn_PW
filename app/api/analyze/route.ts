@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { randomUUID } from "crypto"
+import { getModelForTask, globalCostTracker } from "@/lib/ai-model-router"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-// Using Gemini 1.5 Flash (stable, production-ready model)
-const GEMINI_API_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
-export const maxDuration = 120 // Increased to 120 seconds for complex analysis
+export const maxDuration = 180 // 🔴 PHASE 1: Increased to 180 seconds for better reliability
 
 interface GeminiCandidatePart {
   text?: string
@@ -152,10 +150,14 @@ ${text}
 \`\`\`
 
 **중요**:
-- errors 배열은 실제로 발견된 금지/주의 사항만 포함
+- errors 배열은 실제로 발견된 금지/주의 사항만 포함 (최대 5개까지만)
 - 금지사항 1개 발견 시 overallScore에서 -15점, 주의사항 1개당 -5점
-- 모든 항목은 한국어로 명확하고 구체적으로 작성
-- JSON 형식을 정확히 준수 (중괄호, 따옴표, 쉼표 확인)`
+- 모든 항목은 한국어로 명확하고 간결하게 작성 (각 항목 50자 이내)
+- errors의 reason은 핵심만 30자 이내로 간단히 작성
+- JSON 형식을 정확히 준수 (중괄호, 따옴표, 쉼표 확인)
+- 응답은 반드시 완전한 JSON으로 마무리할 것
+- **절대 금지**: JSON 응답에 "Gemini", "Gemini는", "2.5 Pro" 등의 AI 모델 관련 언급 포함 금지
+- **절대 금지**: JSON 응답에 개인정보 보호, 면책 조항, 경고 문구 포함 금지`
 }
 
 function extractGeneratedText(payload: GeminiResponse): string {
@@ -163,17 +165,103 @@ function extractGeneratedText(payload: GeminiResponse): string {
 }
 
 function extractJsonBlock(text: string): string | null {
+  // 🔴 CRITICAL FIX: Robust JSON extraction with truncation repair
   const codeBlockMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
   if (codeBlockMatch) {
-    return codeBlockMatch[1]
+    return repairTruncatedJson(codeBlockMatch[1])
   }
 
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (jsonMatch) {
-    return jsonMatch[0]
+    return repairTruncatedJson(jsonMatch[0])
   }
 
   return null
+}
+
+// 🔴 CRITICAL FIX: Remove Gemini contamination text
+function removeGeminiContamination(text: string): string {
+  // Remove Gemini disclaimers and warnings that contaminate JSON
+  const contaminationPatterns = [
+    /Gemini는.*?(?=\n|$)/g,
+    /Gemini.*?(?=\n|$)/g,
+    /2\.5 Pro.*?(?=\n|$)/g,
+    /인물 등에 관한 정보 제공 시 실수를 할 수 있으니.*?(?=\n|$)/g,
+    /다시 한번 확인하세요.*?(?=\n|$)/g,
+    /개인 정보 보호.*?(?=\n|$)/g,
+  ]
+  
+  let cleaned = text
+  for (const pattern of contaminationPatterns) {
+    cleaned = cleaned.replace(pattern, '')
+  }
+  
+  return cleaned
+}
+
+// 🔴 CRITICAL FIX: Repair truncated JSON from Gemini
+function repairTruncatedJson(jsonStr: string): string {
+  try {
+    // Try to parse as-is first
+    JSON.parse(jsonStr)
+    return jsonStr
+  } catch (error) {
+    console.log('[Analyze] 🔧 Repairing truncated JSON...')
+    
+    // Step 1: Remove Gemini contamination
+    let repaired = removeGeminiContamination(jsonStr.trim())
+    console.log('[Analyze] 🧹 Removed Gemini contamination')
+    
+    // Step 2: Handle incomplete errors array
+    if (repaired.includes('"errors": [') && !repaired.includes(']')) {
+      // Find the last complete error object
+      const errorsStartIndex = repaired.indexOf('"errors": [')
+      const afterErrors = repaired.substring(errorsStartIndex + '"errors": ['.length)
+      
+      // Find all opening braces after errors start
+      const openBraces = (afterErrors.match(/\{/g) || []).length
+      const closeBraces = (afterErrors.match(/\}/g) || []).length
+      
+      if (openBraces > closeBraces) {
+        // We're inside an incomplete error object - remove it
+        const lastCompleteObjectIndex = repaired.lastIndexOf('},')
+        if (lastCompleteObjectIndex > errorsStartIndex) {
+          // Keep up to the last complete object
+          repaired = repaired.substring(0, lastCompleteObjectIndex + 1)
+        } else {
+          // No complete objects, empty the array
+          repaired = repaired.substring(0, errorsStartIndex + '"errors": ['.length)
+        }
+      }
+      
+      // Close errors array and main object
+      repaired += '\n  ]\n}'
+    } else if (!repaired.endsWith('}')) {
+      // Close main object
+      repaired += '\n}'
+    }
+    
+    // Step 3: Validate and clean up incomplete strings in content/reason fields
+    try {
+      const testParse = JSON.parse(repaired)
+      if (testParse.errors && Array.isArray(testParse.errors)) {
+        // Filter out errors with contaminated or incomplete text
+        testParse.errors = testParse.errors.filter((err: any) => {
+          const hasContent = err.content && err.content.length > 0
+          const hasReason = err.reason && err.reason.length > 0
+          const notContaminated = !err.content?.includes('Gemini') && !err.reason?.includes('Gemini')
+          return hasContent && hasReason && notContaminated
+        })
+        repaired = JSON.stringify(testParse)
+      }
+    } catch {
+      // If still invalid, try one more time
+      console.log('[Analyze] 🔧 Final repair attempt...')
+    }
+    
+    console.log('[Analyze] 🔧 Repaired JSON length:', repaired.length)
+    return repaired
+  }
 }
 
 function toNumber(value: unknown, fallback: number): number {
@@ -240,25 +328,15 @@ function normalizeAnalysis(
     careerDirection: careerDirection || "미지정",
     careerAlignment,
     errors: normalizeErrors(raw.errors),
-    strengths: toArrayOfStrings(raw.strengths, ["생기부가 전반적으로 잘 작성되었습니다"]),
-    improvements: toArrayOfStrings(raw.improvements, ["지속적인 개선이 필요합니다"]),
-    suggestions: toArrayOfStrings(raw.suggestions, ["구체적인 사례를 더 추가하면 좋습니다"]),
+    strengths: toArrayOfStrings(raw.strengths, []),
+    improvements: toArrayOfStrings(raw.improvements, []),
+    suggestions: toArrayOfStrings(raw.suggestions, []),
     originalText,
     analyzedAt: new Date().toISOString(),
   }
 
-  if (normalized.strengths.length === 0) {
-    normalized.strengths = ["생기부가 전반적으로 잘 작성되었습니다"]
-  }
-
-  if (normalized.improvements.length === 0) {
-    normalized.improvements = ["지속적인 개선이 필요합니다"]
-  }
-
-  if (normalized.suggestions.length === 0) {
-    normalized.suggestions = ["구체적인 사례를 더 추가하면 좋습니다"]
-  }
-
+  // No fallback values - if AI doesn't provide data, show empty arrays
+  // This ensures we show real AI analysis only
   return normalized
 }
 
@@ -287,14 +365,25 @@ export async function POST(request: NextRequest) {
     }
 
     const prompt = createAnalysisPrompt(text, careerDirection ?? "")
-    console.log(`[Analyze] 📝 프롬프트 생성 완료 (${prompt.length} 글자)`)    console.log("[Analyze] 🚀 Gemini API 호출 중...")
+    console.log(`[Analyze] 📝 프롬프트 생성 완료 (${prompt.length} 글자)`)
+    
+    // 🧠 하이브리드 AI: 생기부 분석은 복잡한 작업이므로 Gemini 2.0 Flash-Exp 사용
+    const selectedModel = getModelForTask({ 
+      type: 'analyze', 
+      textLength: text.length,
+      requiresDeepReasoning: true
+    })
+    globalCostTracker.trackRequest(selectedModel)
+    
+    console.log(`[Analyze] 🚀 ${selectedModel.name} API 호출 중...`)
 
+    // 🔴 PHASE 1: Extended timeout with retry capability
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 180000) // 180 second timeout
 
     let response: Response
     try {
-      response = await fetch(`${GEMINI_API_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+      response = await fetch(`${selectedModel.endpoint}?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -310,10 +399,10 @@ export async function POST(request: NextRequest) {
           },
         ],
         generationConfig: {
-          temperature: 0.4,
+          temperature: selectedModel.temperature,
           topK: 32,
           topP: 0.95,
-          maxOutputTokens: 8192,
+          maxOutputTokens: selectedModel.maxTokens,
         },
         safetySettings: [
           {
@@ -405,7 +494,8 @@ export async function POST(request: NextRequest) {
     }
 
     const normalized = normalizeAnalysis(parsed, careerDirection ?? "", text)
-    console.log(`[Analyze] ✅ 정규화 완료 (ID: ${normalized.id})`)    console.log("[Analyze] === 분석 성공적으로 완료 ===")
+    console.log(`[Analyze] ✅ 정규화 완료 (ID: ${normalized.id})`)
+    console.log("[Analyze] === 분석 성공적으로 완료 ===")
 
     return NextResponse.json({ result: normalized, raw: generatedText })
   } catch (error) {

@@ -49,14 +49,14 @@
 ## 📦 설치 방법
 
 ### 1. 프로젝트 클론
-```bash
+\`\`\`bash
 cd /home/user/webapp/korean-ocr-enhanced
-```
+\`\`\`
 
 ### 2. 의존성 설치
-```bash
+\`\`\`bash
 python main.py install
-```
+\`\`\`
 
 ### 3. 모델 다운로드
 모델은 첫 실행 시 자동으로 다운로드됩니다.
@@ -64,31 +64,31 @@ python main.py install
 ## 🚀 실행 방법
 
 ### API 서버 실행
-```bash
+\`\`\`bash
 python main.py server
-```
+\`\`\`
 - API 문서: http://localhost:8000/docs
 
 ### 웹 인터페이스 실행
-```bash
+\`\`\`bash
 python main.py web
-```
+\`\`\`
 - 웹 UI: http://localhost:8501
 
 ### 모든 서비스 실행
-```bash
+\`\`\`bash
 python main.py all
-```
+\`\`\`
 
 ### 단일 이미지 OCR
-```bash
+\`\`\`bash
 python main.py ocr --image path/to/image.jpg
-```
+\`\`\`
 
 ### 벤치마크 실행
-```bash
+\`\`\`bash
 python main.py benchmark
-```
+\`\`\`
 
 ## 📊 성능 지표
 
@@ -104,7 +104,7 @@ python main.py benchmark
 ## 🔧 고급 설정
 
 ### OCR 설정 커스터마이징
-```python
+\`\`\`python
 from src.korean_ocr_engine import OCRConfig, UltraKoreanOCR
 
 config = OCRConfig(
@@ -117,12 +117,12 @@ config = OCRConfig(
 )
 
 ocr = UltraKoreanOCR(config)
-```
+\`\`\`
 
 ## 📝 API 사용 예제
 
 ### Python 클라이언트
-```python
+\`\`\`python
 import requests
 import base64
 
@@ -143,19 +143,19 @@ response = requests.post(
 result = response.json()
 print(f"인식된 텍스트: {result['full_text']}")
 print(f"신뢰도: {result['confidence']:.2%}")
-```
+\`\`\`
 
 ### cURL 예제
-```bash
+\`\`\`bash
 curl -X POST "http://localhost:8000/ocr/file" \
   -F "file=@image.jpg" \
   -F "enable_enhancement=true" \
   -F "extract_fields=true"
-```
+\`\`\`
 
 ## 🏗 프로젝트 구조
 
-```
+\`\`\`
 korean-ocr-enhanced/
 ├── src/
 │   ├── korean_ocr_engine.py      # 핵심 OCR 엔진
@@ -172,7 +172,7 @@ korean-ocr-enhanced/
 ├── requirements.txt             # 의존성 목록
 ├── main.py                      # 메인 실행 파일
 └── README.md                    # 문서
-```
+\`\`\`
 
 ## 📈 개선 효과
 

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import { getModelForTask, globalCostTracker } from "@/lib/ai-model-router"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-const GEMINI_API_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 export const maxDuration = 60
 
@@ -189,7 +188,15 @@ export async function POST(request: NextRequest) {
 
     const prompt = createProjectPrompt(analysisResult, careerDirection || "")
 
-    const response = await fetch(`${GEMINI_API_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+    // 🧠 하이브리드 AI: 프로젝트 추천은 중간 복잡도 (창의성 필요)
+    const selectedModel = getModelForTask({ 
+      type: 'projects',
+      textLength: JSON.stringify(analysisResult).length
+    })
+    globalCostTracker.trackRequest(selectedModel)
+    console.log(`[Projects] 🚀 ${selectedModel.name} 사용`)
+
+    const response = await fetch(`${selectedModel.endpoint}?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -205,19 +212,20 @@ export async function POST(request: NextRequest) {
           },
         ],
         generationConfig: {
-          temperature: 0.7,
+          temperature: selectedModel.temperature,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 4096,
+          maxOutputTokens: selectedModel.maxTokens,
         },
       }),
     })
 
     if (!response.ok) {
-      console.error("[Projects] Gemini API error", response.status)
+      const errorText = await response.text()
+      console.error("[Projects] Gemini API error", response.status, errorText)
       return NextResponse.json(
-        { result: buildFallbackProjects(analysisResult, careerDirection) },
-        { status: 200 }
+        { error: `프로젝트 추천 API 호출 실패 (${response.status})`, details: errorText },
+        { status: 502 }
       )
     }
 
@@ -225,18 +233,20 @@ export async function POST(request: NextRequest) {
     const generatedText = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ""
 
     if (!generatedText) {
+      console.error("[Projects] Empty response from Gemini")
       return NextResponse.json(
-        { result: buildFallbackProjects(analysisResult, careerDirection) },
-        { status: 200 }
+        { error: "AI가 응답하지 않았습니다. 다시 시도해주세요." },
+        { status: 502 }
       )
     }
 
     const jsonBlock = extractJsonBlock(generatedText)
 
     if (!jsonBlock) {
+      console.error("[Projects] Failed to extract JSON from response:", generatedText.substring(0, 200))
       return NextResponse.json(
-        { result: buildFallbackProjects(analysisResult, careerDirection) },
-        { status: 200 }
+        { error: "AI 응답 형식 오류. AI가 예상치 못한 형식으로 응답했습니다.", raw: generatedText.substring(0, 200) },
+        { status: 502 }
       )
     }
 
@@ -246,8 +256,8 @@ export async function POST(request: NextRequest) {
     } catch (parseError) {
       console.error("[Projects] JSON parse error", parseError)
       return NextResponse.json(
-        { result: buildFallbackProjects(analysisResult, careerDirection) },
-        { status: 200 }
+        { error: "AI 응답 JSON 파싱 실패. AI 응답 형식이 올바르지 않습니다.", raw: jsonBlock?.substring(0, 200) },
+        { status: 502 }
       )
     }
   } catch (error) {

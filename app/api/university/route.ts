@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import { getModelForTask, globalCostTracker } from "@/lib/ai-model-router"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-const GEMINI_API_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 export const maxDuration = 60
 
@@ -190,7 +189,15 @@ export async function POST(request: NextRequest) {
 
     const prompt = createUniversityPrompt(analysisResult, careerDirection || "")
 
-    const response = await fetch(`${GEMINI_API_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+    // 🧠 하이브리드 AI: 대학 예측은 복잡한 작업 (한국 대학 계층 이해 필요)
+    const selectedModel = getModelForTask({ 
+      type: 'university',
+      requiresDeepReasoning: true
+    })
+    globalCostTracker.trackRequest(selectedModel)
+    console.log(`[University] 🚀 ${selectedModel.name} 사용`)
+
+    const response = await fetch(`${selectedModel.endpoint}?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

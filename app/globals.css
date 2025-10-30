@@ -352,3 +352,186 @@
 .animate-tilt-3d {
   animation: tilt-3d 6s ease-in-out infinite;
 }
+
+/* 🔴 PHASE 11: Mobile Optimization - Touch-optimized & Smartphone-specific */
+
+/* Safe area insets for notched devices (iPhone X, etc.) */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .safe-area-inset-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .safe-area-inset-left {
+    padding-left: env(safe-area-inset-left);
+  }
+  
+  .safe-area-inset-right {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* Touch-optimized tap targets (minimum 44x44 iOS, 48x48 Android) */
+@media (hover: none) and (pointer: coarse) {
+  /* Mobile touch device detection */
+  button,
+  a,
+  [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation; /* Prevents double-tap zoom */
+  }
+  
+  /* Larger tap targets for navigation */
+  nav button,
+  nav a {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  
+  /* Remove hover effects on touch devices */
+  .hover\:scale-105:hover,
+  .hover\:scale-110:hover {
+    transform: none;
+  }
+  
+  /* Touch feedback with active state */
+  button:active,
+  a:active,
+  [role="button"]:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+    transition: all 0.1s ease;
+  }
+}
+
+/* Smartphone-specific optimizations */
+@media (max-width: 640px) {
+  /* Reduce padding on mobile */
+  .mobile-compact {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Smaller text on very small screens */
+  @media (max-width: 375px) {
+    html {
+      font-size: 14px;
+    }
+  }
+  
+  /* Hide unnecessary elements on small screens */
+  .hide-on-mobile {
+    display: none !important;
+  }
+  
+  /* Full width containers on mobile */
+  .container {
+    max-width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Scrollable content with momentum */
+  .mobile-scroll {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  
+  /* Fixed bottom navigation safe area */
+  .fixed-bottom-nav {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+  }
+}
+
+/* Landscape mode optimizations for smartphones */
+@media (max-width: 896px) and (orientation: landscape) {
+  /* Reduce vertical spacing in landscape */
+  .space-y-4 {
+    gap: 0.5rem;
+  }
+  
+  /* Adjust navigation height */
+  nav {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+  
+  /* Hide large headers in landscape */
+  .landscape-hide {
+    display: none;
+  }
+}
+
+/* High DPI screens (Retina displays) */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  /* Sharper borders and shadows */
+  .glass-card,
+  .liquid-glass {
+    border-width: 0.5px;
+  }
+}
+
+/* Dark mode optimizations for OLED screens */
+@media (prefers-color-scheme: dark) {
+  /* True black for OLED power saving */
+  .dark\:bg-true-black {
+    background-color: #000000;
+  }
+  
+  /* Reduce white brightness for OLED */
+  .dark\:text-soft-white {
+    color: #e0e0e0;
+  }
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Prevent text size adjustment on orientation change (iOS Safari) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Smooth scrolling for in-page navigation */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Fix iOS Safari bottom bar issues */
+@supports (-webkit-touch-callout: none) {
+  /* iOS Safari specific */
+  .ios-fix-vh {
+    min-height: -webkit-fill-available;
+  }
+  
+  body {
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* Pull-to-refresh prevention (optional) */
+body {
+  overscroll-behavior-y: contain;
+}
+
+/* Better tap highlight */
+* {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  tap-highlight-color: rgba(0, 0, 0, 0.1);
+}

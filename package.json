@@ -5,7 +5,11 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "dev:full": "npm run ocr:start & npm run dev",
     "lint": "eslint .",
+    "ocr:bg": "cd ocr_service && python3 main.py > ocr.log 2>&1 &",
+    "ocr:install": "cd ocr_service && chmod +x install_paddle.sh start_ocr.sh && ./install_paddle.sh",
+    "ocr:start": "cd ocr_service && chmod +x start_ocr.sh && ./start_ocr.sh",
     "start": "next start"
   },
   "dependencies": {
@@ -60,10 +64,11 @@
     "react-hook-form": "^7.60.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.4",
+    "sharp": "^0.33.0",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "tesseract.js": "latest",
+    "tesseract.js": "^5.1.1",
     "vaul": "^0.9.9",
     "zod": "3.25.76"
   },

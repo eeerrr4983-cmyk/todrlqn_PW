@@ -27,6 +27,7 @@ import {
   ChevronDown,
   ChevronUp,
   Users,
+  Filter,
 } from "lucide-react"
 import { StorageManager } from "@/components/storage-manager"
 import type { AnalysisResult, Comment, Reply } from "@/lib/types"
@@ -34,9 +35,121 @@ import { useRouter } from "next/navigation"
 import { AIMentoring } from "@/components/ai-mentoring"
 import { AuthModal } from "@/components/auth-modal"
 import { useAuth } from "@/lib/auth-context"
+import { getUserDisplayName, getUserStudentId } from "@/lib/user-session"
 
 type SortOption = "recent" | "popular"
 type TabOption = "all" | "saved"
+type CategoryFilter = "all" | "science" | "humanities" // 🔴 PHASE 9: 이과/문과 필터
+
+// 🔴 PHASE 7: AI 키워드 생성 함수 (app/page.tsx와 동일)
+const generateAIKeyword = (analysis: AnalysisResult): string => {
+  // 🔴 FIX: 진로방향이 있고 "미지정"이 아닌 경우에만 사용
+  if (analysis.careerDirection && analysis.careerDirection.trim() && analysis.careerDirection !== '미지정') {
+    return analysis.careerDirection
+  }
+  
+  // 생기부 내용 기반 키워드 추정
+  const originalText = analysis.originalText?.toLowerCase() || ''
+  
+  // 이공계열 키워드
+  if (originalText.includes('공학') || originalText.includes('과학') || originalText.includes('수학') || originalText.includes('물리') || originalText.includes('화학')) {
+    if (originalText.includes('컴퓨터') || originalText.includes('소프트웨어') || originalText.includes('프로그래밍') || originalText.includes('코딩')) {
+      return '컴퓨터공학과'
+    }
+    if (originalText.includes('기계') || originalText.includes('로봇')) {
+      return '기계공학과'
+    }
+    if (originalText.includes('전기') || originalText.includes('전자')) {
+      return '전자공학과'
+    }
+    return '이공계열'
+  }
+  
+  // 의학계열
+  if (originalText.includes('의학') || originalText.includes('간호') || originalText.includes('보건') || originalText.includes('병원') || originalText.includes('의사')) {
+    if (originalText.includes('간호')) {
+      return '간호학과'
+    }
+    return '의예과'
+  }
+  
+  // 경영/경제
+  if (originalText.includes('경영') || originalText.includes('경제') || originalText.includes('사업') || originalText.includes('마케팅')) {
+    return '경영학과'
+  }
+  
+  // 인문계열
+  if (originalText.includes('문학') || originalText.includes('역사') || originalText.includes('철학') || originalText.includes('언어')) {
+    return '인문계열'
+  }
+  
+  // 예체능
+  if (originalText.includes('미술') || originalText.includes('음악') || originalText.includes('체육') || originalText.includes('디자인')) {
+    return '예체능계열'
+  }
+  
+  // 기본값
+  return '종합계열'
+}
+
+// 🔴 PHASE 7: 2줄 AI 요약 생성 (민감정보 필터링 포함)
+const generateAISummary = (analysis: AnalysisResult): string => {
+  const strengths = analysis.strengths || []
+  const improvements = analysis.improvements || []
+  
+  // 민감정보 필터링 함수
+  const filterSensitiveInfo = (text: string): string => {
+    return text
+      .replace(/[가-힣]{2,4}(중학교|고등학교|대학교|초등학교)/g, 'XX학교')
+      .replace(/[가-힣]{2,4}시\s?[가-힣]{2,4}구/g, 'XX시 XX구')
+      .replace(/\d{3}-\d{4}-\d{4}/g, 'XXX-XXXX-XXXX')
+      .replace(/[가-힣]{3,4}\s?선생님/g, 'XX 선생님')
+      .replace(/19\d{2}년|20\d{2}년/g, 'XXXX년')
+  }
+  
+  // 🔴 UX FIX: 주요 강점 1개 선택 (더 짧게 제한하여 "..." 방지)
+  const mainStrength = strengths.length > 0 
+    ? strengths.reduce((longest, current) => 
+        current.length > longest.length ? current : longest, strengths[0]
+      ).substring(0, 50) // 50자로 단축 (기존 80자)
+    : '다양한 활동 경험'
+  
+  // 🔴 UX FIX: 주요 개선점 1개 선택 (더 짧게 제한)
+  const mainImprovement = improvements.length > 0
+    ? improvements[0].substring(0, 50) // 50자로 단축 (기존 80자)
+    : '추가 발전 가능'
+  
+  // 2줄 요약 생성 (민감정보 필터링 적용)
+  const line1 = filterSensitiveInfo(`강점: ${mainStrength}`)
+  const line2 = filterSensitiveInfo(`개선: ${mainImprovement}`)
+  
+  return `${line1}... ${line2}...`
+}
+
+// Smart timestamp formatter: 몇시간전/어제/MM.DD format
+const formatCommentTimestamp = (dateString: string): string => {
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (diffMinutes < 1) {
+    return "방금 전"
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes}분 전`
+  } else if (diffHours < 24) {
+    return `${diffHours}시간 전`
+  } else if (diffDays === 1) {
+    return "어제"
+  } else {
+    // Format as MM.DD
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    const day = date.getDate().toString().padStart(2, '0')
+    return `${month}.${day}`
+  }
+}
 type DetailTabOption = "strengths" | "improvements"
 
 export default function ExplorePage() {
@@ -53,6 +166,10 @@ export default function ExplorePage() {
   const router = useRouter()
   const [showAIMentoring, setShowAIMentoring] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all") // 🔴 PHASE 9
+  const [expandedSubKeywords, setExpandedSubKeywords] = useState(false) // 🔴 PHASE 9
+  const [isCategoryFilterExpanded, setIsCategoryFilterExpanded] = useState(false) // 🔴 PHASE 12: Collapsible category filter
+  const [detailedKeywordFilter, setDetailedKeywordFilter] = useState<string | null>(null) // 🔴 UX: Detailed keyword filter
 
   const isGuest = user?.isGuest || false
 
@@ -98,9 +215,27 @@ export default function ExplorePage() {
     }
   }
 
+  // 🔴 PHASE 9: 카테고리 분류 함수
+  const getCategoryFromKeyword = (keyword: string): CategoryFilter => {
+    const scienceKeywords = ['컴퓨터공학과', '기계공학과', '전자공학과', '이공계열', '의예과', '간호학과']
+    const humanitiesKeywords = ['경영학과', '인문계열', '예체능계열']
+    
+    if (scienceKeywords.includes(keyword)) return 'science'
+    if (humanitiesKeywords.includes(keyword)) return 'humanities'
+    return 'all'
+  }
+
   const filteredAnalyses = analyses
     .filter((analysis) => {
       if (tab === "saved" && !interaction.savedAgents.has(analysis.id)) return false
+      
+      // 🔴 PHASE 9: 카테고리 필터링
+      if (categoryFilter !== "all") {
+        const keyword = generateAIKeyword(analysis)
+        const category = getCategoryFromKeyword(keyword)
+        if (category !== categoryFilter && category !== 'all') return false
+      }
+      
       if (searchQuery) {
         const query = searchQuery.toLowerCase().trim()
         const studentTitle = `${analysis.studentId || ""}${analysis.studentName}`.toLowerCase()
@@ -210,6 +345,7 @@ export default function ExplorePage() {
                 <div className="space-y-1">
                   <p className="text-xs text-gray-500 font-medium">맞춤 추천</p>
                   <div className="flex flex-wrap gap-1.5">
+                    {/* 🔴 PHASE 7: 점수 → AI 키워드 변경 */}
                     {recommendedAnalyses.slice(0, 3).map((analysis) => (
                       <Badge
                         key={analysis.id}
@@ -217,7 +353,7 @@ export default function ExplorePage() {
                         className="cursor-pointer hover:bg-black hover:text-white transition-colors text-xs"
                         onClick={() => setSearchQuery(analysis.studentName)}
                       >
-                        {analysis.overallScore}점
+                        {generateAIKeyword(analysis)}
                       </Badge>
                     ))}
                   </div>
@@ -288,6 +424,92 @@ export default function ExplorePage() {
 
                 <div className="h-4 w-px bg-gray-200" />
 
+                {/* 🔴 PHASE 12: 카테고리 필터 - 접을 수 있는 아이콘 형태 */}
+                {!isCategoryFilterExpanded ? (
+                  <motion.button
+                    onClick={() => setIsCategoryFilterExpanded(true)}
+                    whileHover={{ scale: 1.08 }}
+                    whileTap={{ scale: 0.92 }}
+                    className={`p-2 rounded-full transition-all relative ${
+                      categoryFilter !== "all" 
+                        ? "bg-blue-100 hover:bg-blue-200" 
+                        : "hover:bg-gray-100"
+                    }`}
+                    title={categoryFilter !== "all" ? `${categoryFilter === 'science' ? '이과' : '문과'} 필터 활성` : "카테고리 필터"}
+                  >
+                    <Filter className={`w-3.5 h-3.5 transition-colors ${
+                      categoryFilter !== "all" ? "text-blue-600" : "text-gray-600"
+                    }`} />
+                    {categoryFilter !== "all" && (
+                      <motion.span
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white"
+                      />
+                    )}
+                  </motion.button>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex gap-1.5 items-center"
+                  >
+                    <Button
+                      variant={categoryFilter === "all" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCategoryFilter("all")}
+                      className={`rounded-full text-xs h-7 px-3 font-medium ${
+                        categoryFilter === "all"
+                          ? "bg-gray-900 text-white hover:bg-gray-800"
+                          : "border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+                      }`}
+                    >
+                      모두
+                    </Button>
+                    <Button
+                      variant={categoryFilter === "science" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setCategoryFilter("science")
+                        setExpandedSubKeywords(!expandedSubKeywords)
+                      }}
+                      className={`rounded-full text-xs h-7 px-3 font-medium ${
+                        categoryFilter === "science"
+                          ? "bg-blue-600 text-white hover:bg-blue-700"
+                          : "border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+                      }`}
+                    >
+                      이과
+                    </Button>
+                    <Button
+                      variant={categoryFilter === "humanities" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setCategoryFilter("humanities")
+                        setExpandedSubKeywords(!expandedSubKeywords)
+                      }}
+                      className={`rounded-full text-xs h-7 px-3 font-medium ${
+                        categoryFilter === "humanities"
+                          ? "bg-purple-600 text-white hover:bg-purple-700"
+                          : "border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+                      }`}
+                    >
+                      문과
+                    </Button>
+                    <motion.button
+                      onClick={() => setIsCategoryFilterExpanded(false)}
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="p-0.5 hover:bg-gray-100 rounded-full transition-colors"
+                      title="접기"
+                    >
+                      <X className="w-3 h-3 text-gray-500" />
+                    </motion.button>
+                  </motion.div>
+                )}
+
+                <div className="h-4 w-px bg-gray-200" />
+
                 <div className="flex gap-1.5">
                   <Button
                     variant={sortBy === "recent" ? "default" : "outline"}
@@ -330,6 +552,92 @@ export default function ExplorePage() {
                   <RefreshCw className="w-3.5 h-3.5 text-gray-600" />
                 </motion.button>
               </div>
+
+              {/* 🔴 PHASE 12: 확장 가능한 하위 키워드 - 메인 필터가 펼쳐진 경우에만 표시 */}
+              {categoryFilter !== "all" && expandedSubKeywords && isCategoryFilterExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="space-y-1"
+                >
+                  <p className="text-xs text-gray-500 font-medium">
+                    {categoryFilter === "science" ? "이과 세부 분야" : "문과 세부 분야"}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {categoryFilter === "science" ? (
+                      <>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("컴퓨터공학")}
+                          className="cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-all text-xs"
+                        >
+                          컴퓨터공학과
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("기계공학")}
+                          className="cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-all text-xs"
+                        >
+                          기계공학과
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("전자공학")}
+                          className="cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-all text-xs"
+                        >
+                          전자공학과
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("의예과")}
+                          className="cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-all text-xs"
+                        >
+                          의예과
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("간호학과")}
+                          className="cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-all text-xs"
+                        >
+                          간호학과
+                        </Badge>
+                      </>
+                    ) : (
+                      <>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("경영학과")}
+                          className="cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-all text-xs"
+                        >
+                          경영학과
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("경제")}
+                          className="cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-all text-xs"
+                        >
+                          경제학과
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("인문계열")}
+                          className="cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-all text-xs"
+                        >
+                          인문계열
+                        </Badge>
+                        <Badge 
+                          variant="outline" 
+                          onClick={() => setSearchQuery("예체능")}
+                          className="cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-all text-xs"
+                        >
+                          예체능계열
+                        </Badge>
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              )}
             </GlassCard>
           </motion.div>
 
@@ -452,7 +760,19 @@ function AnalysisCard({
     userName?: string
   } | null>(null)
   const [showDetail, setShowDetail] = useState(false)
-  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set())
+  // 🔴 CRITICAL FIX: Auto-expand comments with 2+ replies
+  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(() => {
+    const autoExpand = new Set<string>()
+    const comments = analysis.comments || []
+    comments.forEach((comment) => {
+      const directReplies = (comment.replies || []).filter((r: any) => !r.parentReplyId)
+      // Auto-expand comments with 2 or more direct replies
+      if (directReplies.length >= 2) {
+        autoExpand.add(comment.id)
+      }
+    })
+    return autoExpand
+  })
   const commentSectionRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const lastCommentRef = useRef<HTMLDivElement>(null)
@@ -472,33 +792,17 @@ function AnalysisCard({
 
   const totalCommentCount = getTotalCommentCount()
 
-  const getUserDisplayName = () => {
-    if (typeof window !== "undefined") {
-      const storedStudentId = sessionStorage.getItem("student_id")
-      const storedName = sessionStorage.getItem("student_name")
-
-      if (storedStudentId && storedName) {
-        return `${storedStudentId}${storedName}`
-      }
-
-      let userNumber = sessionStorage.getItem("user_display_number")
-      if (!userNumber) {
-        userNumber = String(Math.floor(Math.random() * 100) + 1)
-        sessionStorage.setItem("user_display_number", userNumber)
-      }
-      return `학생${userNumber}`
-    }
-    return "사용자"
-  }
+  // LB-10: Use global user session management (removed duplicate function)
 
   const handleSubmit = () => {
     if (!unifiedInput.trim()) return
 
     if (!replyContext || replyContext.type === "comment") {
       // Add new comment
+      // LB-10: Using global getUserDisplayName and getUserStudentId
       const newComment: Comment = {
         id: Date.now().toString(),
-        userId: "user-" + Date.now(),
+        userId: getUserStudentId(),
         userName: getUserDisplayName(),
         content: unifiedInput,
         createdAt: new Date().toISOString(),
@@ -516,12 +820,12 @@ function AnalysisCard({
         if (commentSectionRef.current) {
           commentSectionRef.current.scrollTop = commentSectionRef.current.scrollHeight
         }
-      }, 100)
+      }, 150) // 🔴 CRITICAL FIX: 더 긴 딜레이로 확실한 렌더링
     } else if (replyContext.type === "reply" && replyContext.commentId) {
-      // Add reply to comment
+      // Add reply to comment (LB-10: using global session)
       const newReply: Reply = {
         id: Date.now().toString(),
-        userId: "user-" + Date.now(),
+        userId: getUserStudentId(),
         userName: getUserDisplayName(),
         content: unifiedInput,
         createdAt: new Date().toISOString(),
@@ -548,11 +852,12 @@ function AnalysisCard({
         if (commentSectionRef.current) {
           commentSectionRef.current.scrollTop = commentSectionRef.current.scrollHeight
         }
-      }, 100)
+      }, 150) // 🔴 CRITICAL FIX: 더 긴 딜레이로 확실한 렌더링
     } else if (replyContext.type === "nested-reply" && replyContext.commentId && replyContext.replyId) {
+      // Nested reply (LB-10: using global session)
       const newReply: Reply = {
         id: Date.now().toString(),
-        userId: "user-" + Date.now(),
+        userId: getUserStudentId(),
         userName: getUserDisplayName(),
         content: unifiedInput,
         createdAt: new Date().toISOString(),
@@ -580,7 +885,7 @@ function AnalysisCard({
         if (commentSectionRef.current) {
           commentSectionRef.current.scrollTop = commentSectionRef.current.scrollHeight
         }
-      }, 100)
+      }, 150) // 🔴 CRITICAL FIX: 더 긴 딜레이로 확실한 렌더링
     }
   }
 
@@ -643,22 +948,33 @@ function AnalysisCard({
                 </div>
               )}
             </div>
-            <div>
+            <div className="flex-1">
               <h3 className="font-semibold text-sm text-black line-clamp-1">{studentTitle}</h3>
               <p className="text-[10px] text-gray-400">{new Date(analysis.uploadDate).toLocaleDateString("ko-KR")}</p>
             </div>
           </div>
-          <div className="text-xl font-bold text-black">{analysis.overallScore}점</div>
+          {/* 🔴 PHASE 7: 점수 → AI 키워드 변경 */}
+          <div className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-blue-100 to-purple-100 text-blue-900 border border-blue-200 shadow-sm">
+            {generateAIKeyword(analysis)}
+          </div>
         </div>
 
-        <div className="space-y-1">
+        {/* 🔴 PHASE 7: 2줄 AI 요약 추가 (민감정보 필터링) */}
+        <div className="bg-gray-50/80 rounded-lg px-2.5 py-2 border border-gray-100">
+          <p className="text-[11px] text-gray-700 leading-relaxed line-clamp-2">
+            {generateAISummary(analysis)}
+          </p>
+        </div>
+
+        {/* 🔴 PHASE 7: 강점/보완 개수 표시 간소화 */}
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-            <span className="text-xs text-gray-600">강점 {analysis.strengths.length}개</span>
+            <span className="text-xs text-gray-600">강점 {analysis.strengths.length}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <AlertCircle className="w-3.5 h-3.5 text-orange-600" />
-            <span className="text-xs text-gray-600">보완 {analysis.improvements.length}개</span>
+            <span className="text-xs text-gray-600">보완 {analysis.improvements.length}</span>
           </div>
         </div>
 
@@ -708,11 +1024,12 @@ function AnalysisCard({
 
                   return (
                     <div key={comment.id} className="space-y-1">
+                      {/* 🔴 PHASE 8: 댄글 UI 개선 */}
                       <div className="bg-gray-50 rounded-lg p-2 space-y-0.5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-semibold text-black">{comment.userName}</span>
                           <span className="text-xs text-gray-400">
-                            {new Date(comment.createdAt).toLocaleDateString("ko-KR")}
+                            {formatCommentTimestamp(comment.createdAt)}
                           </span>
                         </div>
                         <p className="text-sm text-gray-700">{comment.content}</p>
@@ -741,20 +1058,33 @@ function AnalysisCard({
 
                       {expandedReplies.has(comment.id) && directReplies.length > 0 && (
                         <div className="ml-4 space-y-1">
-                          {directReplies.map((reply) => {
-                            // Find nested replies to this reply
-                            const nestedReplies = (comment.replies || []).filter((r) => r.parentReplyId === reply.id)
+                          {/* LB-09: Replies sorted by newest first (최신순) */}
+                          {directReplies
+                            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            .map((reply) => {
+                            // Find nested replies to this reply (also sorted newest first)
+                            const nestedReplies = (comment.replies || [])
+                              .filter((r) => r.parentReplyId === reply.id)
+                              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
                             return (
                               <div key={reply.id} className="space-y-1">
+                                {/* 🔴 PHASE 8: "{comment.userName}님의 답글" 라벨 추가 */}
                                 <div className="bg-blue-50 rounded-lg p-2 space-y-0.5 border border-blue-100">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-xs font-semibold text-black">{reply.userName}</span>
-                                    <span className="text-xs text-gray-400">
-                                      {new Date(reply.createdAt).toLocaleDateString("ko-KR")}
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-1.5 mb-0.5">
+                                        <span className="text-xs font-semibold text-black">{reply.userName}</span>
+                                        <span className="text-[10px] text-blue-600 font-medium">
+                                          {comment.userName}님의 답글
+                                        </span>
+                                      </div>
+                                      <p className="text-sm text-gray-700">{reply.content}</p>
+                                    </div>
+                                    <span className="text-xs text-gray-400 flex-shrink-0">
+                                      {formatCommentTimestamp(reply.createdAt)}
                                     </span>
                                   </div>
-                                  <p className="text-sm text-gray-700">{reply.content}</p>
                                   <button
                                     onClick={() => handleReplyClick(comment.id, reply.userName, reply.id)}
                                     className="text-xs text-gray-500 hover:text-black transition-colors"
@@ -770,15 +1100,23 @@ function AnalysisCard({
                                         key={nestedReply.id}
                                         className="bg-purple-50 rounded-lg p-2 space-y-0.5 border border-purple-100"
                                       >
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-xs font-semibold text-black">
-                                            {nestedReply.userName}
-                                          </span>
-                                          <span className="text-xs text-gray-400">
-                                            {new Date(nestedReply.createdAt).toLocaleDateString("ko-KR")}
+                                        {/* 🔴 PHASE 8: 중첩 답글에도 "{reply.userName}님의 답글" 라벨 */}
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="flex-1">
+                                            <div className="flex items-center gap-1.5 mb-0.5">
+                                              <span className="text-xs font-semibold text-black">
+                                                {nestedReply.userName}
+                                              </span>
+                                              <span className="text-[10px] text-purple-600 font-medium">
+                                                {reply.userName}님의 답글
+                                              </span>
+                                            </div>
+                                            <p className="text-sm text-gray-700">{nestedReply.content}</p>
+                                          </div>
+                                          <span className="text-xs text-gray-400 flex-shrink-0">
+                                            {formatCommentTimestamp(nestedReply.createdAt)}
                                           </span>
                                         </div>
-                                        <p className="text-sm text-gray-700">{nestedReply.content}</p>
                                         <button
                                           onClick={() =>
                                             handleReplyClick(comment.id, nestedReply.userName, nestedReply.id)
@@ -801,14 +1139,21 @@ function AnalysisCard({
                 })}
             </div>
 
+            {/* 🔴 PHASE 8: 답글 작성 UI 개선 */}
             <div className="space-y-1.5 pt-1">
               {replyContext && (
-                <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
-                  <span className="text-xs text-blue-700">{replyContext.userName}님에게 답글 작성 중</span>
+                <motion.div
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg px-2 py-1.5"
+                >
+                  <span className="text-xs text-blue-700 font-medium">
+                    <span className="font-bold">{replyContext.userName}</span>님에게 답글 작성 중
+                  </span>
                   <button onClick={cancelReply} className="text-blue-600 hover:text-blue-800 transition-colors">
                     <X className="w-3.5 h-3.5" />
                   </button>
-                </div>
+                </motion.div>
               )}
               <div className="flex gap-1.5">
                 <input

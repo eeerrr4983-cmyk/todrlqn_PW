@@ -4,6 +4,8 @@ import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { AuthProvider } from "@/lib/auth-context"
 import { generateMetaTags } from "@/lib/seo"
+import { ErrorBoundary } from "@/components/error-boundary"
+import GalaxyBackground from "@/components/galaxy-background"
 
 import { Geist as V0_Font_Geist, Geist_Mono as V0_Font_Geist_Mono, Source_Serif_4 as V0_Font_Source_Serif_4 } from 'next/font/google'
 
@@ -29,7 +31,10 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
       </head>
       <body className="font-suit antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        <GalaxyBackground />
+        <ErrorBoundary>
+          <AuthProvider>{children}</AuthProvider>
+        </ErrorBoundary>
         <Analytics />
       </body>
     </html>
