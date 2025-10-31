@@ -1,3 +1,5 @@
+"use client"
+
 import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
@@ -5,12 +7,12 @@ import { motion } from 'framer-motion'
 
 import { cn } from '@/lib/utils'
 
-const buttonVariants = cva(
+const liquidGlassButtonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none relative overflow-hidden",
   {
     variants: {
       variant: {
-        default: 'liquid-glass-button-default',
+        default: 'liquid-glass-button-default text-white',
         destructive: 'liquid-glass-button-destructive text-white',
         outline: 'liquid-glass-button-outline',
         secondary: 'liquid-glass-button-secondary',
@@ -33,7 +35,7 @@ const buttonVariants = cva(
   },
 )
 
-function Button({
+function LiquidGlassButton({
   className,
   variant,
   size,
@@ -41,38 +43,29 @@ function Button({
   children,
   ...props
 }: React.ComponentProps<'button'> &
-  VariantProps<typeof buttonVariants> & {
+  VariantProps<typeof liquidGlassButtonVariants> & {
     asChild?: boolean
   }) {
-  const Comp = asChild ? Slot : motion.button
-
-  if (variant === 'link' || asChild) {
-    return (
-      <Comp
-        data-slot="button"
-        className={cn(buttonVariants({ variant, size, className }))}
-        {...props}
-      >
-        {children}
-      </Comp>
-    )
-  }
+  const Comp = asChild ? Slot : 'button'
 
   return (
-    <Comp
-      data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+    <motion.div
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
       transition={{ type: "spring", stiffness: 400, damping: 25 }}
-      {...props}
     >
-      <span className="liquid-glass-button-content relative z-10">
-        {children}
-      </span>
-      <span className="liquid-glass-button-shimmer absolute inset-0 z-0" />
-    </Comp>
+      <Comp
+        data-slot="button"
+        className={cn(liquidGlassButtonVariants({ variant, size, className }))}
+        {...props}
+      >
+        <span className="liquid-glass-button-content relative z-10">
+          {children}
+        </span>
+        <span className="liquid-glass-button-shimmer absolute inset-0 z-0" />
+      </Comp>
+    </motion.div>
   )
 }
 
-export { Button, buttonVariants }
+export { LiquidGlassButton, liquidGlassButtonVariants }
